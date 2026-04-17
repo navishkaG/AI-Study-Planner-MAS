@@ -211,3 +211,6 @@ output/
 
 # DB file
 data/
+
+# uploaded pdf files
+pdfs/
