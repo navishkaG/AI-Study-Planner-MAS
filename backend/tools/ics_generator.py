@@ -4,32 +4,26 @@ tools/ics_generator.py — Custom tool for Agent 3 (Schedule Generator).
 Converts a structured day-by-day study schedule into a valid iCalendar
 (.ics) file that can be imported into Google Calendar or Apple Calendar.
 
+FIXED:
+  - Task blocks now include pdf_filename and color_index so the frontend
+    can render each card with the colour of its source PDF.
+
 Author: Student 3
 """
 
 import os
 import uuid
 from datetime import datetime, date, timedelta
-from typing import Optional
 
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "..", "output")
 
 DIFFICULTY_MULTIPLIERS = {"high": 1.4, "medium": 1.0, "low": 0.75}
-BUFFER_RATIO = 0.20  # 20% buffer per day
-MAX_DAILY_HOURS = 6.0
-STUDY_START_HOUR = 9  # 9:00 AM default start
+BUFFER_RATIO  = 0.20
+MAX_DAILY_HOURS  = 6.0
+STUDY_START_HOUR = 9
 
 
 def _date_from_str(date_str: str) -> date:
-    """
-    Parse an ISO date string to a date object.
-
-    Args:
-        date_str: Date string in "YYYY-MM-DD" format.
-
-    Returns:
-        Python date object.
-    """
     return datetime.strptime(date_str, "%Y-%m-%d").date()
 
 
@@ -39,18 +33,19 @@ def _build_schedule(
     start_date: str
 ) -> list[dict]:
     """
-    Build a day-by-day time-blocked schedule from the prioritized topic list.
+    Build a day-by-day time-blocked schedule from the prioritised topic list.
 
     Rules applied:
-        1. Highest priority tasks get earliest available slots.
+        1. Highest priority tasks fill earliest available slots.
         2. High-difficulty tasks are never placed last in a day.
-        3. Each day gets a 20% buffer slot reserved.
+        3. Each day reserves a 20% buffer slot.
         4. Total daily allocation never exceeds available_hours.
+        5. pdf_filename and color_index are carried through to each task block.
 
     Args:
         priority_list: Sorted list of PriorityDict-compatible dicts.
-        available_hours: Max study hours the user can do per day.
-        start_date: ISO date string for day 1 of the schedule.
+        available_hours: Max study hours per day.
+        start_date: ISO date string for day 1.
 
     Returns:
         List of DayBlock-compatible dicts.
@@ -72,20 +67,21 @@ def _build_schedule(
             task["estimated_hours"] * DIFFICULTY_MULTIPLIERS.get(task["difficulty"], 1.0),
             1
         )
-        hours_needed = min(hours_needed, slot_hours)  # cap to single day max
+        hours_needed = min(hours_needed, slot_hours)
 
         while hours_needed > 0:
             if remaining_slot <= 0:
-                # Finalize this day — apply "no hard task last" rule
-                if current_tasks and current_tasks[-1]["difficulty"] == "high" and len(current_tasks) > 1:
-                    # Swap last high-difficulty task with second-to-last
+                # Apply "no hard topic last" rule before closing the day.
+                if (current_tasks
+                        and current_tasks[-1]["difficulty"] == "high"
+                        and len(current_tasks) > 1):
                     current_tasks[-1], current_tasks[-2] = current_tasks[-2], current_tasks[-1]
 
                 days.append({
-                    "day": current_day.strftime("%A %Y-%m-%d"),
-                    "date": current_day.isoformat(),
-                    "tasks": list(current_tasks),
-                    "total_hours": round(slot_hours - remaining_slot, 1),
+                    "day":          current_day.strftime("%A %Y-%m-%d"),
+                    "date":         current_day.isoformat(),
+                    "tasks":        list(current_tasks),
+                    "total_hours":  round(slot_hours - remaining_slot, 1),
                     "buffer_hours": buffer
                 })
                 current_day += timedelta(days=1)
@@ -94,22 +90,24 @@ def _build_schedule(
 
             allocate = min(hours_needed, remaining_slot)
             current_tasks.append({
-                "topic": task["topic"],
+                "topic":         task["topic"],
                 "duration_hours": allocate,
-                "difficulty": task["difficulty"],
+                "difficulty":    task["difficulty"],
                 "priority_score": task["priority_score"],
-                "locked": False
+                "locked":        False,
+                # Colour info for the frontend card border.
+                "pdf_filename":  task.get("pdf_filename", ""),
+                "color_index":   task.get("color_index", 0),
             })
             remaining_slot = round(remaining_slot - allocate, 1)
-            hours_needed = round(hours_needed - allocate, 1)
+            hours_needed   = round(hours_needed   - allocate, 1)
 
-    # Flush last day
     if current_tasks:
         days.append({
-            "day": current_day.strftime("%A %Y-%m-%d"),
-            "date": current_day.isoformat(),
-            "tasks": list(current_tasks),
-            "total_hours": round(slot_hours - remaining_slot, 1),
+            "day":          current_day.strftime("%A %Y-%m-%d"),
+            "date":         current_day.isoformat(),
+            "tasks":        list(current_tasks),
+            "total_hours":  round(slot_hours - remaining_slot, 1),
             "buffer_hours": buffer
         })
 
@@ -117,16 +115,6 @@ def _build_schedule(
 
 
 def _format_ics_datetime(day_date: date, hour_offset: float) -> str:
-    """
-    Format a date + hour offset as an iCalendar DTSTART/DTEND string.
-
-    Args:
-        day_date: The calendar date.
-        hour_offset: Decimal hours from midnight (e.g. 9.5 = 09:30).
-
-    Returns:
-        iCalendar datetime string like "20250414T093000".
-    """
     total_minutes = int(hour_offset * 60)
     h, m = divmod(total_minutes, 60)
     dt = datetime(day_date.year, day_date.month, day_date.day, h, m)
@@ -136,12 +124,6 @@ def _format_ics_datetime(day_date: date, hour_offset: float) -> str:
 def _write_ics(schedule: list[dict], output_path: str) -> None:
     """
     Write a schedule list to a valid .ics iCalendar file.
-
-    Each task block becomes a VEVENT with:
-        - SUMMARY: topic name
-        - DTSTART / DTEND: computed from study start hour
-        - DESCRIPTION: difficulty + priority score
-        - UID: unique per event
 
     Args:
         schedule: List of DayBlock-compatible dicts.
@@ -161,8 +143,8 @@ def _write_ics(schedule: list[dict], output_path: str) -> None:
 
         for task in day_block["tasks"]:
             start_str = _format_ics_datetime(day_date, current_hour)
-            end_hour = current_hour + task["duration_hours"]
-            end_str = _format_ics_datetime(day_date, end_hour)
+            end_hour  = current_hour + task["duration_hours"]
+            end_str   = _format_ics_datetime(day_date, end_hour)
             uid = str(uuid.uuid4())
 
             lines += [
@@ -171,11 +153,11 @@ def _write_ics(schedule: list[dict], output_path: str) -> None:
                 f"DTSTART:{start_str}",
                 f"DTEND:{end_str}",
                 f"SUMMARY:Study: {task['topic']}",
-                f"DESCRIPTION:Difficulty: {task['difficulty']} | Priority: {task['priority_score']} | Duration: {task['duration_hours']}h",
+                f"DESCRIPTION:Difficulty: {task['difficulty']} | Priority: {task['priority_score']} | Duration: {task['duration_hours']}h | Source: {task.get('pdf_filename','')}",
                 "STATUS:CONFIRMED",
                 "END:VEVENT",
             ]
-            current_hour = end_hour + 0.25  # 15 min break between sessions
+            current_hour = end_hour + 0.25
 
     lines.append("END:VCALENDAR")
 
@@ -201,8 +183,6 @@ def generate_schedule_and_ics(
 
     Returns:
         Tuple of (schedule_list, ics_file_path).
-            schedule_list: List of DayBlock dicts.
-            ics_file_path: Absolute path to the written .ics file.
 
     Raises:
         ValueError: If priority_list is empty or available_hours <= 0.
@@ -212,7 +192,7 @@ def generate_schedule_and_ics(
     if available_hours <= 0:
         raise ValueError("available_hours must be greater than 0.")
 
-    schedule = _build_schedule(priority_list, available_hours, start_date)
+    schedule    = _build_schedule(priority_list, available_hours, start_date)
     output_path = os.path.join(OUTPUT_DIR, filename)
     _write_ics(schedule, output_path)
 

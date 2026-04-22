@@ -1,8 +1,15 @@
 """
 tools/sqlite_tool.py — Custom tool for Agent 2 (Deadline & Priority Planner).
 
-Reads topics from SQLite, computes priority scores using deadline-aware
-and deadline-free formulas, detects conflicts, and writes results back.
+Reads ALL topics from SQLite (all PDFs, not just the current run),
+computes priority scores using deadline-aware and deadline-free formulas,
+detects conflicts, and writes results back.
+
+FIXED:
+  - Now reads all rows from the topics table regardless of pdf_filename,
+    so topics from every uploaded PDF contribute to the schedule.
+  - Passes pdf_filename and color_index through to priority output so
+    Agent 3 / frontend can colour-code cards by source document.
 
 Author: Student 2
 """
@@ -29,8 +36,13 @@ def _ensure_priority_columns() -> None:
     conn = _get_conn()
     cursor = conn.cursor()
     existing = [row[1] for row in cursor.execute("PRAGMA table_info(topics)")]
-    if "urgency" not in existing:
-        cursor.execute("ALTER TABLE topics ADD COLUMN urgency REAL DEFAULT 0.0")
+    for col, definition in [
+        ("urgency",       "REAL DEFAULT 0.0"),
+        ("pdf_filename",  "TEXT DEFAULT ''"),
+        ("color_index",   "INTEGER DEFAULT 0"),
+    ]:
+        if col not in existing:
+            cursor.execute(f"ALTER TABLE topics ADD COLUMN {col} {definition}")
     conn.commit()
     conn.close()
 
@@ -65,7 +77,7 @@ def _compute_priority_with_deadline(
 
     Formula:
         days_remaining = (due_date - today).days
-        urgency = 1 / max(days_remaining, 1)   (clamped to avoid div-by-zero)
+        urgency = 1 / max(days_remaining, 1)
         priority = difficulty_score + (urgency * 10)
 
     Args:
@@ -90,12 +102,11 @@ def _compute_priority_with_deadline(
 
 def _detect_conflicts(rows: list[dict]) -> list[dict]:
     """
-    Detect scheduling conflicts across all prioritized topics.
+    Detect scheduling conflicts across all prioritised topics.
 
     Conflict types detected:
         1. deadline_clash: 3+ tasks share the same due date
-        2. overload_risk: Topics whose combined estimated_hours > 8 on same day
-        3. all_high: More than 3 consecutive high-priority topics
+        2. consecutive_hard: More than 3 consecutive high-priority topics
 
     Args:
         rows: List of topic dicts with priority, due_date, difficulty.
@@ -134,13 +145,24 @@ def _detect_conflicts(rows: list[dict]) -> list[dict]:
                 })
             high_streak = []
 
+    if len(high_streak) >= 3:
+        conflicts.append({
+            "conflict_type": "consecutive_hard",
+            "affected_topics": high_streak[:],
+            "affected_day": None,
+            "description": f"{len(high_streak)} consecutive high-difficulty topics detected"
+        })
+
     return conflicts
 
 
 def compute_priorities(deadlines: Optional[list[dict]] = None) -> tuple[list[dict], list[dict]]:
     """
-    Main entry: fetch all topics, compute priority scores, detect conflicts,
-    update the database, and return structured results.
+    Main entry: fetch ALL topics from the DB (every PDF), compute priority
+    scores, detect conflicts, update the database, and return results.
+
+    All PDFs' topics are included so the schedule always reflects the full
+    set of uploaded documents.
 
     Args:
         deadlines: Optional list of DeadlineDict with keys: topic, due_date.
@@ -156,8 +178,8 @@ def compute_priorities(deadlines: Optional[list[dict]] = None) -> tuple[list[dic
     """
     _ensure_priority_columns()
     conn = _get_conn()
-    cursor = conn.cursor()
-    rows = [dict(r) for r in cursor.execute("SELECT * FROM topics").fetchall()]
+    # Fetch ALL topics from every PDF — no filter on pdf_filename.
+    rows = [dict(r) for r in conn.execute("SELECT * FROM topics").fetchall()]
     conn.close()
 
     if not rows:
@@ -187,13 +209,16 @@ def compute_priorities(deadlines: Optional[list[dict]] = None) -> tuple[list[dic
         row["due_date"] = due_date
 
         priority_list.append({
-            "topic": row["topic"],
-            "priority_score": priority,
-            "urgency": urgency,
+            "topic":           row["topic"],
+            "priority_score":  priority,
+            "urgency":         urgency,
             "difficulty_score": DIFFICULTY_SCORES.get(row["difficulty"], 2.0),
-            "difficulty": row["difficulty"],
+            "difficulty":      row["difficulty"],
             "estimated_hours": row["estimated_hours"],
-            "due_date": due_date
+            "due_date":        due_date,
+            # Pass colour info through so the schedule can colour cards.
+            "pdf_filename":    row.get("pdf_filename", ""),
+            "color_index":     row.get("color_index", 0),
         })
 
     # Persist back to DB
@@ -208,7 +233,6 @@ def compute_priorities(deadlines: Optional[list[dict]] = None) -> tuple[list[dic
     conn.close()
 
     priority_list.sort(key=lambda x: x["priority_score"], reverse=True)
-    conflicts = _detect_conflicts([dict(p, **{"word_count": r["word_count"]})
-                                   for p, r in zip(priority_list, rows)])
+    conflicts = _detect_conflicts(priority_list)
 
     return priority_list, conflicts
