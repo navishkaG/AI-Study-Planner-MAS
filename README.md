@@ -79,7 +79,7 @@ pip install -r requirements.txt
 
 ### Basic run
 ```bash
-python main.py --pdf path/to/notes.pdf --hours 4
+uvicorn api:app --reload --port 8000
 ```
 
 ### Full run with deadlines
