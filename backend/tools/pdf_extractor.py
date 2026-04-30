@@ -36,6 +36,16 @@ DB_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "study_planner.d
 
 # 8 distinct colour tokens the frontend maps to actual Tailwind/CSS colours.
 PDF_COLORS = ["indigo", "rose", "amber", "teal", "violet", "orange", "cyan", "pink"]
+NOISY_TOPIC_PATTERNS = [
+    r"\bis required\b",
+    r"\bare required\b",
+    r"\bmust be\b",
+    r"\bshould be\b",
+]
+GENERIC_TOPIC_WORDS = {
+    "chapter", "section", "summary", "overview", "content", "contents",
+    "example", "examples", "notes", "topic", "topics", "required"
+}
 
 
 def _init_db() -> None:
@@ -131,6 +141,45 @@ def _clean_text(raw: str) -> str:
     return text.strip()
 
 
+def _looks_like_meaningful_heading(candidate: str) -> bool:
+    """
+    Reject headings that look like OCR noise or generic fragments.
+
+    The extractor is intentionally conservative here: it prefers fewer,
+    cleaner topics over noisy labels such as "IS REQUIRED".
+    """
+    heading = candidate.strip().rstrip(':')
+    if len(heading) < 4:
+        return False
+
+    lower = heading.lower()
+    if any(re.search(pattern, lower) for pattern in NOISY_TOPIC_PATTERNS):
+        return False
+
+    words = re.findall(r"[A-Za-z][A-Za-z0-9-]*", heading)
+    content_words = [word for word in words if len(word) > 2]
+    if not content_words:
+        return False
+
+
+    # Allow single strong words, but reject if it's a generic/low-value term
+    if len(content_words) == 1:
+        word = content_words[0].lower()
+        # Reject if the single word is generic, low-level, or too short
+        if word in GENERIC_TOPIC_WORDS or word in LOW_KEYWORDS or len(word) <= 6:
+            return False
+        # Single strong/technical terms are okay (e.g., "Normalization", "Algorithm")
+        return True
+
+    # Reject if all content words are generic (e.g., "basic topics")
+    if len(content_words) <= 2 and all(word.lower() in GENERIC_TOPIC_WORDS for word in content_words):
+        return False
+    if len(content_words) == 1 and content_words[0].lower() in {"required", "page", "figure", "table"}:
+        return False
+
+    return True
+
+
 def _detect_topics(pages: list[str]) -> list[dict]:
     """
     Detect topic headings from cleaned page text using heading patterns.
@@ -147,7 +196,7 @@ def _detect_topics(pages: list[str]) -> list[dict]:
         List of dicts with keys: topic, start_page, end_page, text_content.
     """
     heading_pattern = re.compile(
-        r'^(\d+[\.\d]*\s+[A-Z].{2,60}|[A-Z][A-Z\s]{4,50}|.{3,60}:)\s*$',
+        r'^(\d+[\.\d]*\s+[A-Z].{2,60}|[A-Z][A-Z\s]{4,50}|[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,5}|.{3,60}:)\s*$',
         re.MULTILINE
     )
     topics = []
@@ -159,7 +208,7 @@ def _detect_topics(pages: list[str]) -> list[dict]:
         lines = page_text.split('\n')
         for line in lines:
             line = line.strip()
-            if heading_pattern.match(line) and len(line) > 4:
+            if heading_pattern.match(line) and len(line) > 4 and _looks_like_meaningful_heading(line):
                 if current_topic:
                     topics.append({
                         "topic": current_topic,

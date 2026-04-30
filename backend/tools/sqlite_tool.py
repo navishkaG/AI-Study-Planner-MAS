@@ -16,12 +16,53 @@ Author: Student 2
 
 import sqlite3
 import os
+import re
 from datetime import date, datetime
 from typing import Optional
+from difflib import SequenceMatcher
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "study_planner.db")
 
 DIFFICULTY_SCORES = {"high": 3.0, "medium": 2.0, "low": 1.0}
+
+
+def _normalize_topic_text(text: str) -> str:
+    """Normalize topic text for fuzzy matching."""
+    return " ".join(re.findall(r"[a-z0-9]+", text.lower()))
+
+
+def _topic_match_score(topic: str, candidate: str) -> float:
+    """Return a similarity score for deadline/topic matching."""
+    topic_key = _normalize_topic_text(topic)
+    candidate_key = _normalize_topic_text(candidate)
+    if not topic_key or not candidate_key:
+        return 0.0
+    if topic_key == candidate_key:
+        return 1.0
+    if topic_key in candidate_key or candidate_key in topic_key:
+        return 0.9
+
+    topic_tokens = set(topic_key.split())
+    candidate_tokens = set(candidate_key.split())
+    union = len(topic_tokens | candidate_tokens) or 1
+    token_score = len(topic_tokens & candidate_tokens) / union
+    sequence_score = SequenceMatcher(None, topic_key, candidate_key).ratio()
+    return max(token_score, sequence_score)
+
+
+def _find_matching_deadline(topic: str, deadlines: list[dict]) -> Optional[str]:
+    """Find the best deadline for a topic using fuzzy matching."""
+    best_due_date: Optional[str] = None
+    best_score = 0.0
+    for deadline in deadlines:
+        score = _topic_match_score(topic, deadline.get("topic", ""))
+        if score > best_score:
+            best_score = score
+            best_due_date = deadline.get("due_date")
+
+    if best_score >= 0.6:
+        return best_due_date
+    return None
 
 
 def _get_conn() -> sqlite3.Connection:
@@ -51,8 +92,8 @@ def _compute_priority_no_deadline(difficulty: str, word_count: int) -> tuple[flo
     """
     Compute priority score when no deadline is provided.
 
-    Formula: priority = difficulty_score + (word_count / 500)
-    Urgency defaults to 0.5 (neutral).
+    Formula: priority = (difficulty_score * 1.7) + min(word_count / 700, 2.0)
+    Urgency defaults to 0.45 (neutral).
 
     Args:
         difficulty: Topic difficulty string.
@@ -62,9 +103,9 @@ def _compute_priority_no_deadline(difficulty: str, word_count: int) -> tuple[flo
         Tuple of (priority_score, urgency).
     """
     diff_score = DIFFICULTY_SCORES.get(difficulty, 2.0)
-    size_factor = word_count / 500
-    priority = round(diff_score + size_factor, 2)
-    return priority, 0.5
+    size_factor = min(word_count / 700, 2.0)
+    priority = round((diff_score * 1.7) + size_factor, 2)
+    return priority, 0.45
 
 
 def _compute_priority_with_deadline(
@@ -78,11 +119,10 @@ def _compute_priority_with_deadline(
     Formula:
         days_remaining = (due_date - today).days
         urgency = 1 / max(days_remaining, 1)
-        priority = difficulty_score + (urgency * 10)
+        priority = (difficulty_score * 1.7) + (urgency * 12) + size_factor
 
     Args:
         difficulty: Topic difficulty string.
-        word_count: Word count of the topic.
         due_date_str: ISO date string "YYYY-MM-DD".
 
     Returns:
@@ -96,7 +136,8 @@ def _compute_priority_with_deadline(
     days_remaining = max((due_date - today).days, 1)
     urgency = round(1 / days_remaining, 4)
     diff_score = DIFFICULTY_SCORES.get(difficulty, 2.0)
-    priority = round(diff_score + (urgency * 10), 2)
+    size_factor = min(word_count / 900, 1.5)
+    priority = round((diff_score * 1.7) + (urgency * 12) + size_factor, 2)
     return priority, urgency
 
 
@@ -179,21 +220,15 @@ def compute_priorities(deadlines: Optional[list[dict]] = None) -> tuple[list[dic
     _ensure_priority_columns()
     conn = _get_conn()
     # Fetch ALL topics from every PDF — no filter on pdf_filename.
-    rows = [dict(r) for r in conn.execute("SELECT * FROM topics").fetchall()]
+    rows = [dict(r) for r in conn.execute("SELECT rowid AS row_id, * FROM topics").fetchall()]
     conn.close()
 
     if not rows:
         raise RuntimeError("No topics found in database. Run Document Analyzer first.")
 
-    deadline_map: dict[str, str] = {}
-    if deadlines:
-        for d in deadlines:
-            deadline_map[d["topic"].lower()] = d["due_date"]
-
     priority_list = []
     for row in rows:
-        topic_key = row["topic"].lower()
-        due_date = deadline_map.get(topic_key)
+        due_date = _find_matching_deadline(row["topic"], deadlines or [])
 
         if due_date:
             priority, urgency = _compute_priority_with_deadline(
@@ -224,10 +259,10 @@ def compute_priorities(deadlines: Optional[list[dict]] = None) -> tuple[list[dic
     # Persist back to DB
     conn = _get_conn()
     cursor = conn.cursor()
-    for p in priority_list:
+    for row, p in zip(rows, priority_list):
         cursor.execute(
-            "UPDATE topics SET priority_score=?, urgency=? WHERE topic=?",
-            (p["priority_score"], p["urgency"], p["topic"])
+            "UPDATE topics SET priority_score=?, urgency=? WHERE rowid=?",
+            (p["priority_score"], p["urgency"], row["row_id"])
         )
     conn.commit()
     conn.close()

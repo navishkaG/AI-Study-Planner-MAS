@@ -37,6 +37,7 @@ export const getPipelineStatus = () => client.get("/pipeline-status");
 
 // ── Results ───────────────────────────────────────────────────────────────────
 export const getSchedule     = () => client.get("/results/schedule");
+export const updateSchedule  = (prompt) => client.post("/results/schedule/update", { prompt });
 export const getPriorities   = () => client.get("/results/priorities");
 export const getTopics       = () => client.get("/results/topics");
 export const getConflicts    = () => client.get("/results/conflicts");

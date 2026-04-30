@@ -46,7 +46,16 @@ def call_ollama(system_prompt: str, user_message: str) -> str:
     except requests.exceptions.ConnectionError:
         return "[Ollama not running — start with: ollama serve]"
     except Exception as e:
-        return f"[LLM error: {e}]"
+        error_msg = str(e)
+        if "500" in error_msg or "Internal Server Error" in error_msg:
+            # Common 500 error causes: model not loaded, out of memory, or malformed request
+            return f"[LLM 500 error - check if model '{OLLAMA_MODEL}' is loaded: ollama list]"
+        elif "404" in error_msg or "not found" in error_msg:
+            return f"[LLM error: Model '{OLLAMA_MODEL}' not found. Install with: ollama pull {OLLAMA_MODEL}]"
+        elif "timeout" in error_msg.lower():
+            return f"[LLM timeout - server may be overloaded or stuck. Try restarting: ollama serve]"
+        else:
+            return f"[LLM error: {error_msg}]"
 
 
 def log_trace(

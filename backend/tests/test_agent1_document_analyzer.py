@@ -21,6 +21,7 @@ from tools.pdf_extractor import (
     _estimate_difficulty,
     _estimate_hours,
     _clean_text,
+    _detect_topics,
     extract_topics_from_pdf,
 )
 
@@ -135,6 +136,20 @@ class TestTextCleaning:
         raw = "   \n  Some content  \n   "
         cleaned = _clean_text(raw)
         assert cleaned == cleaned.strip()
+
+
+class TestTopicDetection:
+
+    def test_ignores_noisy_heading_phrases(self):
+        """Noise like 'IS REQUIRED' must not become a topic label."""
+        pages = [
+            "IS REQUIRED\nThis should be content, not a topic.",
+            "Normalization\nReal topic content follows here.",
+        ]
+        topics = _detect_topics(pages)
+        labels = [topic["topic"] for topic in topics]
+        assert "IS REQUIRED" not in labels
+        assert any(label == "Normalization" for label in labels)
 
 
 class TestErrorHandling:

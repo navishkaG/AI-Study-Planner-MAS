@@ -193,7 +193,13 @@ def generate_schedule_and_ics(
         raise ValueError("available_hours must be greater than 0.")
 
     schedule    = _build_schedule(priority_list, available_hours, start_date)
+    output_path = write_schedule_to_ics(schedule, filename)
+
+    return schedule, output_path
+
+
+def write_schedule_to_ics(schedule: list[dict], filename: str = "study_plan.ics") -> str:
+    """Persist a schedule to an .ics file and return the absolute path."""
     output_path = os.path.join(OUTPUT_DIR, filename)
     _write_ics(schedule, output_path)
-
-    return schedule, os.path.abspath(output_path)
+    return os.path.abspath(output_path)

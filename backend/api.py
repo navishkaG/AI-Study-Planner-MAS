@@ -25,6 +25,7 @@ import requests as pyrequests
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
+from pydantic import BaseModel
 import uvicorn
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -36,6 +37,7 @@ from agents.agent1_document_analyzer import run as agent1_run
 from agents.agent2_priority_planner    import run as agent2_run
 from agents.agent3_schedule_generator  import run as agent3_run
 from agents.agent4_workload_optimizer  import run as agent4_run
+from tools.schedule_editor import apply_schedule_change
 
 # ── Directory setup ───────────────────────────────────────────────────────────
 BASE_DIR   = Path(__file__).parent
@@ -54,6 +56,10 @@ PDF_COLORS = ["indigo", "rose", "amber", "teal", "violet", "orange", "cyan", "pi
 log_buffer: list[str] = []
 pipeline_status: dict = {"running": False, "done": False, "error": None}
 latest_state: Optional[StudyPlanState] = None
+
+
+class ScheduleChangeRequest(BaseModel):
+    prompt: str
 
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(title="AI Study Planner API", version="1.0.0")
@@ -328,6 +334,43 @@ def get_schedule():
         raise HTTPException(404, "No schedule yet. Run the pipeline first.")
     with open(path) as f:
         return {"schedule": json.load(f)}
+
+
+@app.post("/results/schedule/update")
+def update_schedule(change: ScheduleChangeRequest):
+    global latest_state
+
+    path = OUTPUT_DIR / "final_schedule.json"
+    if latest_state:
+        active_schedule = latest_state.get("optimized_schedule") or latest_state.get("schedule", [])
+        available_hours = latest_state.get("available_hours_per_day", 4.0)
+    elif path.exists():
+        with open(path) as f:
+            active_schedule = json.load(f)
+        available_hours = 4.0
+    else:
+        raise HTTPException(404, "No schedule yet. Run the pipeline first.")
+
+    result = apply_schedule_change(
+        active_schedule,
+        change.prompt,
+        available_hours=available_hours,
+        optimize=True,
+    )
+
+    if latest_state:
+        latest_state["schedule"] = result["schedule"]
+        latest_state["optimized_schedule"] = result["schedule"]
+        latest_state["optimizer_log"] = result.get("log", [])
+        latest_state["resolved_conflicts"] = []
+        latest_state["ics_path"] = result.get("ics_path", latest_state.get("ics_path", ""))
+
+    return {
+        "message": result["summary"],
+        "schedule": result["schedule"],
+        "actions": result.get("actions", []),
+        "ics_path": result.get("ics_path", ""),
+    }
 
 
 @app.get("/results/priorities")
