@@ -1,6 +1,6 @@
 // src/pages/Schedule.jsx
 import { useState, useEffect } from "react";
-import { RefreshCw, Download, Calendar, LockKeyhole } from "lucide-react";
+import { RefreshCw, Download, LockKeyhole } from "lucide-react";
 import * as api from "../api.js";
 
 // ── Time formatting ───────────────────────────────────────────────────────────
@@ -142,7 +142,7 @@ function TaskBlock({ task }) {
 function DayColumn({ day, index }) {
   return (
     <div
-      className="bg-white border border-gray-200 rounded-[14px] overflow-hidden flex-shrink-0 w-[220px] shadow-sm flex flex-col"
+      className="bg-white border border-gray-200 rounded-[14px] overflow-hidden shrink-0 w-55 shadow-sm flex flex-col"
       style={{ animationDelay: `${index * 0.05}s` }}
     >
       <div className="px-4 py-3 border-b border-gray-200 bg-white text-center">
@@ -178,8 +178,8 @@ function ColorLegend({ colorMap }) {
     <div className="flex flex-wrap gap-3 mb-4">
       {entries.map(([filename, ci]) => (
         <div key={filename} className="flex items-center gap-1.5 text-[11px] text-gray-700">
-          <span className={`w-3 h-3 rounded-sm flex-shrink-0 ${COLOR_DOT[ci % COLOR_DOT.length]}`} />
-          <span className="truncate max-w-[160px]" title={filename}>{filename}</span>
+          <span className={`w-3 h-3 rounded-sm shrink-0 ${COLOR_DOT[ci % COLOR_DOT.length]}`} />
+          <span className="truncate max-w-40" title={filename}>{filename}</span>
         </div>
       ))}
     </div>
@@ -192,9 +192,12 @@ export default function Schedule() {
   const [colorMap,  setColorMap]  = useState({});   // { "file.pdf": colorIndex }
   const [loading,   setLoading]   = useState(true);
   const [weekStart, setWeekStart] = useState(() => getMondayOfWeek(new Date()));
+  const [changePrompt, setChangePrompt] = useState("");
+  const [changeMessage, setChangeMessage] = useState("");
+  const [applyingChange, setApplyingChange] = useState(false);
 
-  const load = async () => {
-    setLoading(true);
+  const load = async (showSpinner = true) => {
+    if (showSpinner) setLoading(true);
     try {
       const [schedRes, colorRes] = await Promise.all([
         api.getSchedule(),
@@ -208,7 +211,12 @@ export default function Schedule() {
     setLoading(false);
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void load(false);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   const weekSchedule = getWeekSchedule(schedule, weekStart);
   const totalTasks = weekSchedule.reduce((a, d) => a + d.tasks.length, 0);
@@ -217,7 +225,6 @@ export default function Schedule() {
     (a, d) => a + d.tasks.filter(t => t.difficulty === "high").length, 0
   );
   const studyDays = weekSchedule.filter(d => d.tasks.length > 0).length;
-  const hasAnyTasks = totalTasks > 0;
 
   const handlePrevWeek = () => {
     const prev = new Date(weekStart);
@@ -231,10 +238,27 @@ export default function Schedule() {
     setWeekStart(next);
   };
 
+  const handleApplyChange = async () => {
+    const prompt = changePrompt.trim();
+    if (!prompt) return;
+
+    setApplyingChange(true);
+    setChangeMessage("");
+    try {
+      const response = await api.updateSchedule(prompt);
+      setChangeMessage(response.data.message || "Schedule updated.");
+      setChangePrompt("");
+      await load();
+    } catch (error) {
+      setChangeMessage(error?.response?.data?.detail || "Could not update schedule.");
+    }
+    setApplyingChange(false);
+  };
+
   return (
-    <div className="flex flex-col h-screen">
+    <div className="flex flex-col h-screen bg-green-50">
       {/* Topbar */}
-      <header className="bg-white border-b border-green-100 h-[60px] px-8 flex items-center justify-between flex-shrink-0 z-40">
+      <header className="bg-white border-b border-green-100 h-15 px-8 flex items-center justify-between shrink-0 z-40">
         <span className="text-[16px] font-bold text-green-900">Study Schedule</span>
         <div className="flex gap-2">
           <button
@@ -255,8 +279,37 @@ export default function Schedule() {
       {/* Body */}
       <div className="flex flex-col flex-1 min-h-0 p-8 gap-5">
 
+        {/* Schedule edit panel */}
+        <div className="bg-white border border-green-100 rounded-2xl shadow-sm p-4 flex flex-col gap-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <div className="text-[13px] font-bold text-gray-900">Adjust the schedule</div>
+              <div className="text-[11px] text-gray-600">Tell the system what to change, for example move a topic earlier or lighten the weekend.</div>
+            </div>
+            <button
+              onClick={handleApplyChange}
+              disabled={applyingChange}
+              className="flex items-center gap-1.5 text-[12px] font-semibold bg-green-700 text-white rounded-lg px-4 py-2 hover:bg-green-800 transition-colors disabled:opacity-60"
+            >
+              {applyingChange ? "Applying..." : "Apply change"}
+            </button>
+          </div>
+          <textarea
+            value={changePrompt}
+            onChange={(e) => setChangePrompt(e.target.value)}
+            rows={3}
+            placeholder="Example: Move SQL Joins earlier and make the weekend lighter."
+            className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-[13px] text-gray-900 outline-none focus:border-green-400 focus:bg-white transition-colors resize-none"
+          />
+          {changeMessage && (
+            <div className="text-[12px] text-green-800 bg-green-50 border border-green-100 rounded-lg px-3 py-2">
+              {changeMessage}
+            </div>
+          )}
+        </div>
+
         {/* Summary stats */}
-        <div className="grid grid-cols-4 gap-4 flex-shrink-0">
+        <div className="grid grid-cols-4 gap-4 shrink-0">
           {[
             [studyDays,                   "Study Days"],
             [totalTasks,                  "Total Tasks"],
@@ -271,10 +324,10 @@ export default function Schedule() {
         </div>
 
         {/* Weekly plan card */}
-        <div className="bg-white border border-gray-200 rounded-2xl shadow-sm flex flex-col flex-1 min-h-0">
+        <div className="bg-white border border-gray-200 rounded-2xl shadow-sm flex flex-col flex-1 min-h-155">
 
           {/* Card header */}
-          <div className="flex items-center gap-4 px-5 py-4 border-b border-gray-200 flex-shrink-0">
+          <div className="flex items-center gap-4 px-5 py-4 border-b border-gray-200 shrink-0">
             <div className="flex items-center gap-3">
               <h2 className="text-[15px] font-bold text-gray-900">Weekly Plan</h2>
               <span className="text-[12px] text-gray-600 font-medium">{formatWeekRange(weekStart)}</span>
@@ -308,7 +361,7 @@ export default function Schedule() {
 
           {/* PDF colour legend */}
           {Object.keys(colorMap).length > 0 && (
-            <div className="px-5 pt-3 flex-shrink-0">
+            <div className="px-5 pt-3 shrink-0">
               <div className="text-[10px] text-gray-600 uppercase tracking-wider mb-2">
                 Card border colour = source PDF
               </div>
@@ -317,7 +370,7 @@ export default function Schedule() {
           )}
 
           {/* Scrollable calendar — both axes */}
-          <div className="flex-1 min-h-0 max-w-[1200px] overflow-x-auto overflow-y-auto">
+          <div className="flex-1 min-h-0 max-w-300 overflow-x-auto overflow-y-auto">
             {loading ? (
               <div className="flex items-center justify-center h-full text-gray-600">
                 <RefreshCw size={20} className="animate-spin mr-2" /> Loading...

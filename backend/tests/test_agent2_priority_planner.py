@@ -24,6 +24,7 @@ from tools.sqlite_tool import (
     _compute_priority_no_deadline,
     _compute_priority_with_deadline,
     _detect_conflicts,
+    _find_matching_deadline,
     DB_PATH,
 )
 
@@ -135,6 +136,12 @@ class TestPriorityFormulas:
         big,   _ = _compute_priority_no_deadline("medium", 1000)
         small, _ = _compute_priority_no_deadline("medium", 200)
         assert big > small
+
+    def test_fuzzy_deadline_matching_handles_case_and_spacing(self):
+        """Deadline matching should tolerate minor label differences."""
+        due = (date.today() + timedelta(days=5)).isoformat()
+        deadlines = [{"topic": "Normalization of Relations", "due_date": due}]
+        assert _find_matching_deadline(" normalization ", deadlines) == due
 
 
 # ── Conflict detection tests ──────────────────────────────────────────────────
