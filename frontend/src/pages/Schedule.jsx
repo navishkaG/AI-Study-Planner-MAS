@@ -370,7 +370,7 @@ export default function Schedule() {
           )}
 
           {/* Scrollable calendar — both axes */}
-          <div className="flex-1 min-h-0 max-w-300 overflow-x-auto overflow-y-auto">
+          <div className="flex-1 min-h-0 max-w-400 overflow-x-auto overflow-y-auto">
             {loading ? (
               <div className="flex items-center justify-center h-full text-gray-600">
                 <RefreshCw size={20} className="animate-spin mr-2" /> Loading...
