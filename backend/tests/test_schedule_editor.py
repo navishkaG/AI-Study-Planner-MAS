@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from tools.schedule_editor import apply_schedule_change
 
-
+# Helper function to create a day with tasks
 def _make_day(day_date, tasks):
     return {
         "day": day_date.strftime("%A %Y-%m-%d"),
@@ -20,7 +20,7 @@ def _make_day(day_date, tasks):
         "buffer_hours": 0.8,
     }
 
-
+# Sample schedule for testing
 def _sample_schedule():
     start = date.today() + timedelta(days=3)
     return [
@@ -37,13 +37,14 @@ def _sample_schedule():
     ]
 
 
+# Test cases for the schedule editor
 def test_move_topic_earlier():
     schedule = _sample_schedule()
     result = apply_schedule_change(schedule, "Move SQL Joins earlier", 4.0, optimize=False)
     moved_topic_days = [day["date"] for day in result["schedule"] if any(task["topic"] == "SQL Joins" for task in day["tasks"])]
     assert moved_topic_days[0] == schedule[0]["date"]
 
-
+# Test that reblancing reduces the total hours of the busiest day
 def test_rebalance_reduces_heavy_day():
     schedule = _sample_schedule()
     result = apply_schedule_change(schedule, "Rebalance this schedule and make it less busy", 3.5, optimize=True)
