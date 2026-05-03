@@ -48,6 +48,11 @@ def _lock_immovable_tasks(schedule: list[dict], lock_days: int = 2) -> list[dict
     Returns:
         Updated schedule with locked flags set.
     """
+
+    # CRITICAL DESIGN DECISION:
+    # Locking near-term tasks ensures schedule stability and user trust.
+    # Without this, the optimizer could reshuffle immediate plans,
+    # making the system feel unpredictable and unreliable.
     today = date.today()
     cutoff = today + timedelta(days=lock_days)
     updated = copy.deepcopy(schedule)
@@ -160,6 +165,10 @@ def _calculate_change_cost(task: dict, days_to_shift: int) -> int:
     if task.get("locked", False):
         return 9999
 
+    # CORE OPTIMIZATION PRINCIPLE:
+    # Lower cost = less disruption to the user’s plan.
+    # This cost function directly drives the greedy algorithm’s decisions,
+    # making it critical for balancing flexibility vs stability.
     if days_to_shift == 1:
         cost = COST_SHIFT_ONE_DAY
     elif days_to_shift < 7:
@@ -201,6 +210,11 @@ def _fix_overloaded_day(
     if not movable:
         log.append(f"Cannot fix {day_block['day']}: all tasks are locked.")
         return updated, log
+    
+    # GREEDY ALGORITHM CHOICE:
+    # Always move the lowest-priority task first.
+    # This local optimum strategy minimizes disruption cost efficiently
+    # without requiring complex (and expensive) global optimization.
 
     # Pick the task with the LOWEST priority (least disruption to move)
     task_to_move = min(movable, key=lambda t: t["priority_score"])
