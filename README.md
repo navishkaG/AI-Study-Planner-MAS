@@ -65,56 +65,61 @@
 ## Setup
 
 ### 1. Install Ollama
-bash
+```bash
 # Download from https://ollama.com
 ollama pull llama3.2:3b
 ollama serve
-
+```
 
 ### 2. Install Python dependencies
-bash
+```bash
 cd backend
 pip install -r requirements.txt
-
+```
 
 ### 3. Install frontend dependencies
-bash
+
+```bash
 cd frontend
 npm install
-
+```
 
 ---
 
 ## Running the System
 
 ### Start the backend API
-bash
+```bash
 cd backend
 uvicorn api:app --reload --port 8000
-
+```
 
 ### Start the frontend dashboard
-bash
+```bash
 cd frontend
 npm run dev
+```
 
 
 ### Full backend run with deadlines
-bash
+```bash
 cd backend
 python main.py \
   --pdf pdfs/databases.pdf pdfs/os.pdf \
   --deadlines data/deadlines_example.json \
   --hours 5 \
   --start 2025-04-14
+```
 
 
 ### Deadlines JSON format
-json
+
+```json
 [
   {"topic": "SQL Joins", "due_date": "2025-04-20"},
   {"topic": "Normalization", "due_date": "2025-04-18"}
 ]
+```
 
 
 ---
@@ -123,20 +128,27 @@ json
 
 bash
 # All tests
+
+```
 python -m pytest tests/ -v
+```
 
 # Individual student tests
+
+```
 python -m pytest tests/test_agent1_document_analyzer.py -v
 python -m pytest tests/test_agent2_priority_planner.py -v
 python -m pytest tests/test_agent3_schedule_generator.py -v
 python -m pytest tests/test_agent4_workload_optimizer.py -v
 
+```
 
 ---
 
 ## System Flow
 
 
+```
 PDF files + deadlines
         ↓
 [Agent 1] Document Analyzer
@@ -163,7 +175,7 @@ PDF files + deadlines
 output/final_schedule.json
 output/study_plan.ics
 output/agent_trace.json
-
+```
 
 ---
 
