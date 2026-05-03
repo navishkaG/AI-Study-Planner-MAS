@@ -26,13 +26,16 @@ Student: Student 4
 import sys
 import os
 
+# Add parent directory to path to allow absolute imports when running as a script
+# (Useful for local execution without packaging the project)
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from state import StudyPlanState
 from tools.workload_analyzer import optimize_schedule
 from utils import call_ollama, log_trace
 
-
+# SYSTEM_PROMPT strictly limits LLM behavior to avoid hallucinations.
+# The LLM is intentionally restricted to *only* rephrasing optimizer output.
 SYSTEM_PROMPT = """
 You are a study plan optimizer assistant. Your job is to write a short,
 friendly message to a student explaining what changes were made to their
@@ -77,6 +80,10 @@ def run(state: StudyPlanState) -> StudyPlanState:
 
     max_hours = state.get("available_hours_per_day", 4.0)
 
+    # Core optimization step:
+    # - Detects overloads and hard-day streaks
+    # - Applies minimum-cost task shifting
+    # - Respects locked tasks (today & tomorrow)
     optimized, resolved_conflicts, optimizer_log = optimize_schedule(
         schedule=state["schedule"],
         max_daily_hours=max_hours
